@@ -301,7 +301,8 @@ function startListening(){
     const inc=JSON.stringify(data);
     if(isSaving||inc===lastSavedJSON)return;
     const openIds=new Set([...document.querySelectorAll('#milestoneList details[open]')].map(el=>el.dataset.milestoneId));
-    db=data; if(!db.milestones)db.milestones=JSON.parse(JSON.stringify(SEED_MILESTONES));
+    db=data;
+    if(!db.milestones||db.milestones.length===0){db.milestones=JSON.parse(JSON.stringify(SEED_MILESTONES));saveToStorage();}
     lastSavedJSON=inc;
     if(currentUser)renderAll(openIds);
   });
