@@ -181,6 +181,7 @@
     <div class="flex items-center gap-3">
       <button id="btnSummary" onclick="openSummary()" style="padding:8px 16px;border-radius:8px;background:#4f46e5;color:white;cursor:pointer;font-size:14px;font-weight:500;border:none;">📋 My Summary</button>
       <button id="btnAdmin" onclick="openAdminSummary()" style="padding:8px 16px;border-radius:8px;background:#7c3aed;color:white;cursor:pointer;font-size:14px;font-weight:500;border:none;">👁 Admin</button>
+      <button id="btnDownload" onclick="downloadData()" style="padding:8px 16px;border-radius:8px;background:#059669;color:white;cursor:pointer;font-size:14px;font-weight:500;border:none;">⬇️ Download</button>
       <button id="btnProfile" onclick="openProfile()" style="padding:8px 16px;border-radius:8px;background:var(--surface);color:var(--text);cursor:pointer;font-size:14px;font-weight:500;border:1px solid var(--border);">👤 Profile</button>
     </div>
   </div>
@@ -563,6 +564,81 @@ async function deleteStep(milestoneId, stepId) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
+// EXPORT & DOWNLOAD
+// ═════════════════════════════════════════════════════════════════════════
+
+function downloadData() {
+  if (!db.milestones || db.milestones.length === 0) {
+    alert('No data to download');
+    return;
+  }
+  
+  // Prepare flat data structure for CSV
+  const rows = [];
+  
+  for (const milestone of db.milestones) {
+    for (const step of (milestone.steps || [])) {
+      for (const idea of (step.ideas || [])) {
+        const createdBy = idea.createdBy?.name || idea.createdBy?.email || 'Unknown';
+        const createdAt = idea.createdAt ? new Date(idea.createdAt).toLocaleString() : '';
+        
+        rows.push({
+          'Milestone': milestone.title,
+          'Step': step.title,
+          'Idea': idea.text || formatIdeaText(idea),
+          'Domain': idea.domain || '',
+          'Effort': idea.effort || '',
+          'Created By': createdBy,
+          'Created Date': createdAt,
+          'Votes': (idea.votes || []).length,
+          'Builders': (idea.builders || []).map(b => b.name).join('; '),
+          'Testers': (idea.testers || []).map(t => t.name).join('; ')
+        });
+      }
+    }
+  }
+  
+  if (rows.length === 0) {
+    alert('No ideas to download');
+    return;
+  }
+  
+  // Generate CSV
+  const headers = Object.keys(rows[0]);
+  const csvContent = [
+    headers.map(h => `"${h}"`).join(','),
+    ...rows.map(row => 
+      headers.map(h => {
+        const val = row[h] || '';
+        return `"${String(val).replace(/"/g, '""')}"`;
+      }).join(',')
+    )
+  ].join('\n');
+  
+  // Generate JSON for backup
+  const jsonContent = JSON.stringify({
+    exportDate: new Date().toISOString(),
+    data: db
+  }, null, 2);
+  
+  // Download CSV
+  const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const csvLink = document.createElement('a');
+  csvLink.href = URL.createObjectURL(csvBlob);
+  csvLink.download = `ai-sprint-ideas-${new Date().toISOString().split('T')[0]}.csv`;
+  csvLink.click();
+  
+  // Download JSON
+  const jsonBlob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
+  const jsonLink = document.createElement('a');
+  jsonLink.href = URL.createObjectURL(jsonBlob);
+  jsonLink.download = `ai-sprint-ideas-backup-${new Date().toISOString().split('T')[0]}.json`;
+  jsonLink.click();
+  
+  console.log('✅ Downloaded CSV and JSON backups');
+}
+
+// ═════════════════════════════════════════════════════════════════════════
 // RENDERING
 // ═════════════════════════════════════════════════════════════════════════
 
@@ -614,10 +690,14 @@ function renderAll() {
                       <div class="text-xs text-slate-500 mt-1">
                         ${idea.domain ? '<span style="background:#f3f4f6;padding:2px 8px;border-radius:4px;">'+escH(idea.domain)+'</span>' : ''}
                       </div>
+                      <div class="text-xs text-slate-400 mt-2 italic">
+                        Added by <strong>${escH(idea.createdBy?.name || idea.createdBy?.email || 'Unknown')}</strong>
+                        ${idea.createdAt ? ' on ' + new Date(idea.createdAt).toLocaleDateString() : ''}
+                      </div>
                     </div>
                     <button onclick="deleteIdea('${idea.id}')" class="btn-danger" style="font-size:11px;">×</button>
                   </div>
-                  <div class="flex gap-2 mt-2">
+                  <div class="flex gap-2 mt-3">
                     <button onclick="toggleVote('${idea.id}')" class="btn-action">${(idea.votes || []).length} 👍</button>
                     <button onclick="toggleBuilder('${idea.id}')" class="btn-action">${(idea.builders || []).length} 🔨</button>
                     <button onclick="toggleTester('${idea.id}')" class="btn-action">${(idea.testers || []).length} 🧪</button>
