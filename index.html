@@ -251,6 +251,43 @@
   </div>
 </div>
 
+<div id="editIdeaModal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="p-6 border-b border-slate-200 flex items-center justify-between">
+      <h2 class="font-bold text-lg">Edit Idea</h2>
+      <button onclick="closeEditIdeaModal()" class="text-2xl" style="color:var(--text-3);cursor:pointer;">✕</button>
+    </div>
+    <div class="p-6">
+      <input type="hidden" id="editIdeaId"/>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-2">Update your idea</label>
+        <div id="editIdeaEditor" style="border:1px solid var(--border);border-radius:8px;"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold mb-2">Domain</label>
+          <input type="text" id="editIdeaDomain" placeholder="e.g., Backend, ML, DevOps" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:14px;"/>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-2">Effort</label>
+          <select id="editIdeaEffort" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:14px;">
+            <option value="low">Low (1–3 days)</option>
+            <option value="medium" selected>Medium (1–2 weeks)</option>
+            <option value="high">High (3+ weeks)</option>
+          </select>
+        </div>
+      </div>
+      <div class="text-xs text-slate-500 mb-4">
+        Created by <strong id="editIdeaCreatorName"></strong> on <strong id="editIdeaCreatedDate"></strong>
+      </div>
+      <div class="flex gap-2 justify-end">
+        <button onclick="closeEditIdeaModal()" class="btn-secondary">Cancel</button>
+        <button onclick="confirmEditIdea()" class="btn-primary">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═════════════════════════════════════════════════════════════════════════
 // INITIALIZE FIREBASE LISTENER
@@ -502,6 +539,84 @@ async function toggleTester(ideaId) {
   renderAll();
 }
 
+async function openEditIdeaModal(ideaId) {
+  if (!currentUser) { await ensureLoggedIn(); if (!currentUser) return; }
+  
+  const idea = findIdea(ideaId);
+  if (!idea) {
+    alert('Idea not found');
+    return;
+  }
+  
+  // Check if current user is the creator
+  if (idea.createdBy?.email !== currentUser.email) {
+    alert('You can only edit your own ideas');
+    return;
+  }
+  
+  document.getElementById('editIdeaId').value = ideaId;
+  document.getElementById('editIdeaDomain').value = idea.domain || '';
+  document.getElementById('editIdeaEffort').value = idea.effort || 'medium';
+  document.getElementById('editIdeaCreatorName').textContent = idea.createdBy?.name || idea.createdBy?.email || 'Unknown';
+  document.getElementById('editIdeaCreatedDate').textContent = idea.createdAt ? new Date(idea.createdAt).toLocaleDateString() : '';
+  
+  if (!window._editQuill) {
+    window._editQuill = new Quill('#editIdeaEditor', {
+      theme: 'snow',
+      placeholder: 'Describe your idea...',
+      modules: { toolbar: [['bold', 'italic', 'underline'], ['link']] }
+    });
+  }
+  
+  // Load existing content
+  if (idea.content && typeof idea.content === 'object' && idea.content.ops) {
+    window._editQuill.setContents(idea.content);
+  } else {
+    window._editQuill.setContents([{ insert: idea.text || '' }]);
+  }
+  
+  document.getElementById('editIdeaModal').classList.remove('hidden');
+}
+
+function closeEditIdeaModal() {
+  document.getElementById('editIdeaModal').classList.add('hidden');
+}
+
+async function confirmEditIdea() {
+  if (!currentUser) { alert('Please log in'); return; }
+  
+  const ideaId = document.getElementById('editIdeaId').value;
+  const idea = findIdea(ideaId);
+  
+  if (!idea) { alert('Idea not found'); return; }
+  
+  // Verify ownership
+  if (idea.createdBy?.email !== currentUser.email) {
+    alert('You can only edit your own ideas');
+    return;
+  }
+  
+  const content = window._editQuill.getContents();
+  const text = window._editQuill.getText();
+  
+  if (!text.trim()) { alert('Please write an idea'); return; }
+  
+  // Update idea
+  idea.content = content;
+  idea.text = text;
+  idea.domain = document.getElementById('editIdeaDomain').value || 'General';
+  idea.effort = document.getElementById('editIdeaEffort').value;
+  idea.updatedAt = new Date().toISOString();
+  idea.updatedBy = {
+    email: currentUser.email,
+    name: currentUser.displayName || currentUser.email
+  };
+  
+  await saveToStorage();
+  closeEditIdeaModal();
+  renderAll();
+}
+
 // ═════════════════════════════════════════════════════════════════════════
 // MILESTONE & STEP MANAGEMENT
 // ═════════════════════════════════════════════════════════════════════════
@@ -581,6 +696,8 @@ function downloadData() {
       for (const idea of (step.ideas || [])) {
         const createdBy = idea.createdBy?.name || idea.createdBy?.email || 'Unknown';
         const createdAt = idea.createdAt ? new Date(idea.createdAt).toLocaleString() : '';
+        const updatedBy = idea.updatedBy?.name || (idea.updatedAt ? 'Unknown' : '');
+        const updatedAt = idea.updatedAt ? new Date(idea.updatedAt).toLocaleString() : '';
         
         rows.push({
           'Milestone': milestone.title,
@@ -590,6 +707,8 @@ function downloadData() {
           'Effort': idea.effort || '',
           'Created By': createdBy,
           'Created Date': createdAt,
+          'Last Edited By': updatedBy,
+          'Last Edited Date': updatedAt,
           'Votes': (idea.votes || []).length,
           'Builders': (idea.builders || []).map(b => b.name).join('; '),
           'Testers': (idea.testers || []).map(t => t.name).join('; ')
@@ -693,9 +812,13 @@ function renderAll() {
                       <div class="text-xs text-slate-400 mt-2 italic">
                         Added by <strong>${escH(idea.createdBy?.name || idea.createdBy?.email || 'Unknown')}</strong>
                         ${idea.createdAt ? ' on ' + new Date(idea.createdAt).toLocaleDateString() : ''}
+                        ${idea.updatedAt && idea.updatedAt !== idea.createdAt ? ' <span style="color:#d97706;">(edited)</span>' : ''}
                       </div>
                     </div>
-                    <button onclick="deleteIdea('${idea.id}')" class="btn-danger" style="font-size:11px;">×</button>
+                    <div style="display:flex;gap:4px;flex-direction:column;align-items:flex-end;">
+                      ${idea.createdBy?.email === (currentUser?.email || '') ? `<button onclick="openEditIdeaModal('${idea.id}')" class="btn-action" style="font-size:11px;padding:4px 8px;">✏️ Edit</button>` : ''}
+                      <button onclick="deleteIdea('${idea.id}')" class="btn-danger" style="font-size:11px;padding:4px 8px;">✕ Delete</button>
+                    </div>
                   </div>
                   <div class="flex gap-2 mt-3">
                     <button onclick="toggleVote('${idea.id}')" class="btn-action">${(idea.votes || []).length} 👍</button>
